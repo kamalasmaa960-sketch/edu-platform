@@ -1,0 +1,12 @@
+name = "edu-platform"
+main = "index.js"
+compatibility_date = "2025-01-01"
+
+# Durable Object مبني على SQLite (مدعوم في الخطة المجانية) — لا R2 ولا KV ولا أي خدمة مدفوعة
+[[durable_objects.bindings]]
+name = "DB"
+class_name = "Database"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Database"]

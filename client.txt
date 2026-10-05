@@ -1,0 +1,252 @@
+"use strict";
+const h = (t, a, ...c) => { const e = document.createElement(t); for (const k in a || {}) { const v = a[k]; if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (k === "class") e.className = v; else if (v !== false && v != null) e.setAttribute(k, v); } for (const x of c.flat(9)) if (x != null && x !== false) e.append(x.nodeType ? x : document.createTextNode(x)); return e; };
+async function api(p, m = "GET", b) {
+  let r; try { r = await fetch("/api/" + p, { method: m, headers: b ? { "content-type": "application/json" } : {}, body: b ? JSON.stringify(b) : undefined, credentials: "same-origin" }); } catch { throw new Error("تعذر الاتصال بالإنترنت، تحقق من الشبكة وحاول مرة أخرى"); }
+  let d = {}; try { d = await r.json(); } catch {}
+  if (!r.ok) throw new Error(d.error || "حدث خطأ، حاول مرة أخرى"); return d;
+}
+let ME = null, SET = {}, tok = 0;
+const root = document.getElementById("app");
+const nav = (p) => { history.pushState(0, "", p); route(); };
+document.addEventListener("click", (e) => { const a = e.target.closest("a[data-l]"); if (a && !e.metaKey && !e.ctrlKey) { e.preventDefault(); nav(a.getAttribute("href")); } });
+addEventListener("popstate", route);
+const L = (href, t, cls) => h("a", { href, "data-l": 1, class: cls }, t);
+const msg = (t, ok) => h("div", { class: ok ? "okm" : "err" }, t);
+const price = (x) => (x > 0 ? x + " ج.م" : "مجاني");
+const date = (t) => (t ? new Date(t).toLocaleDateString("ar-EG") : "");
+const rich = (t) => (/^https?:\/\/\S+$/.test(t) ? h("img", { src: t, class: "qi", loading: "lazy", alt: "" }) : t);
+function theme() { const s = document.documentElement.style; [["--p", "primary"], ["--b", "buttonColor"], ["--bg", "bg"], ["--t", "text"]].forEach(([v, k]) => SET[k] && s.setProperty(v, SET[k])); }
+const empty = (t) => h("p", { class: "muted" }, t);
+const bar = (p) => h("div", { class: "bar2" }, h("i", { style: `width:${p}%` }));
+function form(fields, submit, label) {
+  const f = h("form", { class: "box" }), out = h("div"), ins = {};
+  for (const [k, l, o] of fields) { const i = o && o.ta ? h("textarea", { rows: 3 }) : h("input", { type: (o && o.type) || "text", autocomplete: (o && o.ac) || "off", inputmode: o && o.im }); if (o && o.v != null) i.value = o.v; ins[k] = i; f.append(h("label", {}, l), i); }
+  const btn = h("button", { class: "btn", type: "submit" }, label); f.append(out, btn);
+  f.addEventListener("submit", async (e) => { e.preventDefault(); btn.disabled = true; out.replaceChildren(); try { const v = {}; for (const k in ins) v[k] = ins[k].value; await submit(v, out); } catch (x) { out.replaceChildren(msg(x.message)); } btn.disabled = false; });
+  return f;
+}
+function frame(content) {
+  const out = async () => { await api("logout", "POST", {}).catch(() => {}); ME = null; nav("/"); };
+  return h("div", {},
+    h("header", {}, h("div", { class: "bar" }, L("/", h("span", { class: "brand" }, SET.logo ? h("img", { src: SET.logo, alt: "", onerror: (e) => e.target.remove() }) : null, SET.name || ""), "brand"),
+      h("nav", {}, L("/courses", "الكورسات"), L("/groups", "المجموعات"), L("/my", "دورياتي"), ME ? L("/inbox", "الرسائل") : null, ME ? h("button", { onclick: out }, "تسجيل الخروج") : L("/login", "دخول")))),
+    h("main", { class: "wrap" }, content),
+    h("footer", {}, SET.footer || "", SET.contact ? h("div", {}, SET.contact) : null, h("div", {}, L("/control", "الكونترول"))));
+}
+async function route() {
+  const my = ++tok, p = location.pathname; let v, t = "", m;
+  root.replaceChildren(frame(empty("جاري التحميل...")));
+  try {
+    if (p === "/") v = await Home(); else if (p === "/courses") v = await Listing("courses"); else if (p === "/groups") v = await Listing("groups");
+    else if ((m = p.match(/^\/course\/(\w+)$/))) v = await Course(m[1]); else if ((m = p.match(/^\/group\/(\w+)$/))) v = await Group(m[1]);
+    else if (p === "/login" || p === "/register") v = Auth(p === "/register"); else if (p === "/my") v = await My(); else if (p === "/inbox") v = await Inbox(); else if (p === "/control") v = await Control();
+    else v = h("div", { class: "box" }, h("h1", {}, "الصفحة غير موجودة"), L("/", "العودة للرئيسية", "btn"));
+  } catch (e) {
+    if (e.status === 401 || /تسجيل الدخول/.test(e.message)) v = h("div", { class: "box" }, h("p", {}, "سجّل الدخول للمتابعة."), L("/login", "تسجيل دخول الطالب", "btn"));
+    else v = h("div", {}, msg(e.message), h("button", { class: "btn", onclick: route }, "إعادة المحاولة"));
+  }
+  if (my !== tok) return; root.replaceChildren(frame(v)); if (v && v.dataset && v.dataset.t) document.title = v.dataset.t + " - " + SET.name; scrollTo(0, 0);
+}
+const card = (href, it, extra) => L(href, [it.cover ? h("img", { class: "im", src: it.cover, loading: "lazy", alt: it.name, onerror: (e) => e.target.replaceWith(h("div", { class: "im" })) }) : h("div", { class: "im" }), h("div", { class: "cb" }, h("b", {}, it.name), h("p", { class: "muted" }, (it.description || "").slice(0, 90)), extra || h("span", { class: "pr" }, price(it.price)))], "card");
+async function Home() {
+  const d = await api("public");
+  const hero = h("section", { class: "hero", style: SET.heroImage ? `background-image:linear-gradient(#0005,#0007),url('${SET.heroImage.replace(/['")\\]/g, "")}')` : "" },
+    SET.logo ? h("img", { class: "logo", src: SET.logo, alt: "" }) : null, h("h1", {}, SET.name), h("h2", {}, SET.title), h("p", {}, SET.description),
+    h("div", { class: "btns" }, L("/courses", "الكورسات", "btn s"), L("/groups", "المجموعات", "btn s"), L("/my", "دورياتي", "btn s"), ME ? null : L("/login", "تسجيل دخول الطالب", "btn"), ME ? null : L("/register", "إنشاء حساب", "btn"), L("/control", "الكونترول", "btn o")));
+  return h("div", {}, hero, h("h2", {}, "المجموعات"), d.groups.length ? h("div", { class: "grid" }, d.groups.slice(0, 6).map((g) => card("/group/" + g.id, g))) : empty("لا توجد مجموعات منشورة بعد."),
+    h("h2", {}, "الكورسات"), d.courses.length ? h("div", { class: "grid" }, d.courses.slice(0, 6).map((c) => card("/course/" + c.id, c))) : empty("لا توجد كورسات منشورة بعد."));
+}
+async function Listing(kind) {
+  const d = (await api("public"))[kind], one = kind === "courses" ? "course" : "group", g = h("div", { class: "grid" });
+  const draw = (q) => { const r = d.filter((x) => (x.name + " " + (x.description || "")).toLowerCase().includes(q.toLowerCase())); g.replaceChildren(...(r.length ? r.map((x) => card(`/${one}/${x.id}`, x)) : [empty(d.length ? "لا توجد نتائج مطابقة." : "لا يوجد محتوى منشور بعد.")])); };
+  draw(""); const s = h("input", { type: "search", placeholder: "ابحث...", oninput: (e) => draw(e.target.value) });
+  return h("div", { "data-t": kind === "courses" ? "الكورسات" : "المجموعات" }, h("h1", {}, kind === "courses" ? "الكورسات" : "المجموعات"), s, g);
+}
+function Auth(reg) {
+  const go = async (path, v) => { const d = await api(path, "POST", v); ME = d.student; nav("/my"); };
+  return h("div", { class: "box", style: "max-width:460px;margin:auto" }, h("h1", {}, reg ? "إنشاء حساب" : "تسجيل دخول الطالب"),
+    reg ? form([["name", "الاسم الكامل"], ["phone", "رقم الهاتف", { type: "tel", im: "tel", ac: "tel" }], ["grade", "الصف الدراسي"], ["password", "كلمة المرور (6 أحرف على الأقل)", { type: "password", ac: "new-password" }]], (v) => go("register", v), "إنشاء الحساب")
+      : form([["phone", "رقم الهاتف", { type: "tel", im: "tel", ac: "tel" }], ["password", "كلمة المرور", { type: "password", ac: "current-password" }]], (v) => go("login", v), "دخول"),
+    reg ? L("/login", "لديك حساب؟ سجّل الدخول") : L("/register", "ليس لديك حساب؟ أنشئ حسابًا"));
+}
+async function My() {
+  const d = await api("my"), st = { pending: "قيد المراجعة", rejected: "مرفوض" };
+  return h("div", { "data-t": "دورياتي" }, h("h1", {}, "دورياتي"), h("p", { class: "muted" }, `${d.student.name} — رقم الطالب: ${d.student.code}`),
+    d.items.length ? h("div", { class: "grid" }, d.items.map((i) => card(`/${i.type}/${i.id}`, i, h("div", {}, bar(i.pct), h("small", {}, i.pct + "% مكتمل"), h("br"), h("span", { class: "btn sm" }, "دخول"))))) : empty("لا توجد اشتراكات مقبولة بعد. تصفح الكورسات أو المجموعات واشترك."),
+    d.requests.length ? [h("h2", {}, "طلباتي"), h("div", { class: "box" }, d.requests.map((r) => h("div", {}, `${r.targetName} — ${st[r.status] || r.status} (${date(r.createdAt)})`)))] : null,
+    d.results.length ? [h("h2", {}, "نتائجي"), h("div", { class: "box" }, d.results.map((r) => h("div", {}, `${r.course || "كورس محذوف"}: ${r.score} / ${r.total}`)))] : null);
+}
+async function Inbox() {
+  const d = await api("inbox"), k = { private: "رسالة خاصة", group: "إعلان المجموعة", public: "رسالة عامة" };
+  return h("div", { "data-t": "الرسائل" }, h("h1", {}, "الرسائل والإعلانات"), d.messages.length ? d.messages.map((m) => h("div", { class: "box" }, h("small", { class: "muted" }, `${k[m.kind]} — ${date(m.createdAt)}`), h("b", {}, m.title ? h("div", {}, m.title) : null), h("div", {}, m.text))) : empty("لا توجد رسائل."),
+    h("h2", {}, "أسئلتي"), d.questions.length ? d.questions.map((q) => h("div", { class: "box" }, h("small", { class: "muted" }, q.courseName), h("div", {}, q.text), q.reply ? msg("الرد: " + q.reply, 1) : empty("بانتظار الرد"))) : empty("لم ترسل أسئلة بعد."));
+}
+function player(v) {
+  const u = (v.url || "").trim(), y = u.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([\w-]{11})/), bad = () => msg("تعذر تشغيل هذا الفيديو. تأكد من أن الرابط صحيح ومسموح بتضمينه.");
+  if (y) return h("iframe", { class: "vid", src: "https://www.youtube.com/embed/" + y[1] + "?rel=0&playsinline=1", allow: "accelerometer; encrypted-media; picture-in-picture; fullscreen", allowfullscreen: 1, referrerpolicy: "strict-origin-when-cross-origin", title: v.title });
+  if (!/^https:\/\//i.test(u)) return bad();
+  if (/\.(mp4|webm|ogg|mov)(\?|$)/i.test(u)) return h("video", { class: "vid", src: u, controls: 1, playsinline: 1, preload: "metadata", poster: v.thumb || null, onerror: (e) => e.target.replaceWith(bad()) });
+  return h("div", {}, h("iframe", { class: "vid", src: u, allowfullscreen: 1, referrerpolicy: "strict-origin-when-cross-origin", title: v.title }), h("small", { class: "muted" }, "إن لم يظهر الفيديو، "), h("a", { href: u, target: "_blank", rel: "noopener" }, "افتحه في نافذة جديدة"));
+}
+function Enroll(target) {
+  const box = h("div", { class: "box" }, empty("جاري التحميل..."));
+  api("payments?target=" + target.id).then((pm) => {
+    if (!pm.length) return box.replaceChildren(msg("لا توجد طرق دفع متاحة حاليًا، تواصل مع الإدارة."));
+    const sel = h("select", {}, pm.map((x) => h("option", { value: x.id }, x.name))), info = h("div", { class: "okm" });
+    const show = () => { const x = pm.find((y) => y.id === sel.value); info.replaceChildren(h("b", {}, "بيانات الدفع: "), h("div", { style: "white-space:pre-wrap" }, x.details)); }; sel.onchange = show; show();
+    const f = form([["name", "الاسم", { v: ME.name }], ["phone", "رقم الهاتف", { type: "tel", v: ME.phone }], ["phone2", "رقم إضافي (اختياري)", { type: "tel" }], ["receipt", "رابط صورة الإيصال (ارفعها على أي موقع صور وضع الرابط)", { type: "url" }]],
+      async (v, out) => { const d = await api("enroll", "POST", { ...v, targetId: target.id, methodId: sel.value }); box.replaceChildren(msg(d.message, 1)); }, "إرسال الطلب");
+    f.prepend(h("label", {}, "طريقة الدفع"), sel, info); box.replaceChildren(h("h3", {}, "الاشتراك في: " + target.name), f);
+  }).catch((e) => box.replaceChildren(msg(e.message)));
+  return box;
+}
+function gate(d, target) {
+  if (!ME) return h("div", { class: "box" }, h("p", {}, "سجّل الدخول للاشتراك ومشاهدة المحتوى."), L("/login", "تسجيل دخول الطالب", "btn"), " ", L("/register", "إنشاء حساب", "btn o"));
+  if (d.enrollment === "pending") return msg("طلبك قيد المراجعة.", 1);
+  const w = h("div", {}); if (d.enrollment === "rejected") w.append(msg("تم رفض طلبك السابق، يمكنك إعادة المحاولة."));
+  const b = h("button", { class: "btn", onclick: () => { b.replaceWith(Enroll(target)); } }, "اشترك الآن"); w.append(b); return w;
+}
+async function Group(id) {
+  const d = await api("group/" + id), g = d.group;
+  return h("div", { "data-t": g.name }, h("h1", {}, g.name), g.cover ? h("img", { src: g.cover, class: "vid", style: "object-fit:cover", alt: g.name }) : null, h("p", {}, g.description), h("p", { class: "pr" }, price(g.price) + (g.grade ? " — " + g.grade : "")),
+    d.access ? msg("أنت مشترك في هذه المجموعة.", 1) : gate(d, g), h("h2", {}, "الكورسات"), d.courses.length ? h("div", { class: "grid" }, d.courses.map((c) => card("/course/" + c.id, c))) : empty("لا توجد كورسات في هذه المجموعة بعد."));
+}
+async function Course(id) {
+  const d = await api("course/" + id), c = d.course, wrap = h("div", { "data-t": c.name }), watched = new Set((d.progress || {}).watched || []);
+  wrap.append(h("h1", {}, c.name), d.group ? L("/group/" + d.group.id, "المجموعة: " + d.group.name) : null, h("p", {}, c.description), h("p", { class: "muted" }, (c.teacher ? "المدرس: " + c.teacher + " — " : "") + date(c.createdAt) + " — " + d.videoCount + " فيديو"));
+  if (!d.access) { if (c.cover) wrap.append(h("img", { src: c.cover, class: "vid", style: "object-fit:cover", alt: c.name })); wrap.append(h("p", { class: "pr" }, price(c.price)), gate(d, c)); return wrap; }
+  const stage = h("div"), list = h("div", { class: "vl box" }), pc = h("small");
+  const upd = () => { pc.textContent = `تم مشاهدة ${watched.size} من ${d.videos.length}`; };
+  const play = (v, b) => { list.querySelectorAll("button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); stage.replaceChildren(h("h3", {}, v.title), player(v), h("p", {}, v.description)); if (!watched.has(v.id) && d.progress) api("progress", "POST", { courseId: c.id, videoId: v.id }).then(() => { watched.add(v.id); b.firstChild.textContent = "✔"; upd(); }).catch(() => {}); };
+  d.videos.forEach((v) => { const b = h("button", { onclick: () => play(v, b) }, h("span", {}, watched.has(v.id) ? "✔" : "▶"), h("span", {}, v.title), h("small", { class: "muted" }, v.duration || "")); list.append(b); });
+  wrap.append(d.videos.length ? [pc, stage, list] : empty("لم تتم إضافة فيديوهات بعد."));
+  upd(); const last = d.videos.findIndex((v) => v.id === (d.progress || {}).last); if (d.videos.length) list.children[Math.max(last, 0)].click();
+  if (d.assignment && d.assignment.questions.length) wrap.append(Assignment(c, d));
+  if (d.progress) wrap.append(h("h3", {}, "اسأل المدرس"), form([["text", "سؤالك", { ta: 1 }]], async (v, out) => { await api("ask", "POST", { courseId: c.id, text: v.text }); out.replaceChildren(msg("تم إرسال سؤالك.", 1)); }, "إرسال السؤال"));
+  return wrap;
+}
+function Assignment(c, d) {
+  const a = d.assignment, box = h("div", { class: "box" }), ans = {};
+  const draw = (res) => {
+    box.replaceChildren(h("h2", {}, a.title), res ? h("div", { class: "okm" }, `نتيجتك: ${res.score} من ${res.total}`) : null);
+    a.questions.forEach((q, qi) => {
+      const dt = res && res.details.find((x) => x.id === q.id);
+      box.append(h("div", {}, h("b", {}, `${qi + 1}. `), rich(q.q), q.opts.map((o, i) => h("button", { type: "button", class: "opt" + (dt ? (i === dt.correct ? " ok" : i === dt.chosen ? " bad" : "") : ans[q.id] === i ? " sel" : ""), disabled: !!res, onclick: () => { ans[q.id] = i; draw(); } }, rich(o)))));
+    });
+    if (!res) box.append(h("button", { class: "btn", onclick: async (e) => { if (Object.keys(ans).length < a.questions.length && !confirm("لم تجب عن كل الأسئلة. إرسال؟")) return; e.target.disabled = true; try { const r = await api("assignment/" + c.id + "/submit", "POST", { answers: ans }); draw(r.result); } catch (x) { box.append(msg(x.message)); e.target.disabled = false; } } }, "تسليم الواجب"));
+    else box.append(h("button", { class: "btn o", onclick: () => { for (const k in ans) delete ans[k]; draw(); } }, "إعادة المحاولة"));
+  };
+  draw(d.result); return box;
+}
+
+/* ================= الكونترول ================= */
+let D = {};
+const load = async (...cs) => { await Promise.all(cs.map(async (c) => (D[c] = await api("admin/" + c)))); };
+const nm = (col, id) => ((D[col] || []).find((x) => x.id === id) || {}).name || "—";
+const STAT = [["published", "منشور"], ["draft", "مسودة"]];
+const FIELDS = {
+  groups: [["name", "اسم المجموعة"], ["description", "الوصف", "ta"], ["cover", "رابط صورة الغلاف"], ["price", "السعر", "n"], ["grade", "الصف"], ["status", "الحالة", "sel", STAT]],
+  courses: [["name", "اسم الكورس"], ["description", "الوصف", "ta"], ["cover", "رابط صورة الغلاف"], ["price", "السعر", "n"], ["groupId", "المجموعة", "sel", () => D.groups.map((x) => [x.id, x.name])], ["teacher", "المدرس"], ["status", "الحالة", "sel", STAT]],
+  videos: [["courseId", "الكورس", "sel", () => D.courses.map((x) => [x.id, x.name])], ["title", "عنوان الفيديو"], ["description", "الوصف", "ta"], ["url", "رابط الفيديو (YouTube أو رابط مباشر)"], ["thumb", "صورة مصغرة (اختياري)"], ["order", "الترتيب", "n"], ["duration", "المدة (اختياري)"], ["status", "الحالة", "sel", STAT]],
+  assignments: [["courseId", "الكورس", "sel", () => D.courses.map((x) => [x.id, x.name])], ["title", "عنوان الواجب"], ["questions", "الأسئلة — سطر لكل سؤال:  السؤال | اختيار1 | اختيار2 | اختيار3 | رقم الاختيار الصحيح  (يمكن وضع رابط صورة بدل النص)", "q"]],
+  payments: [["name", "اسم الطريقة (Vodafone Cash, InstaPay...)"], ["details", "الرقم / بيانات الدفع", "ta"], ["status", "الحالة", "sel", [["active", "مفعّلة"], ["inactive", "موقوفة"]]], ["targets", "تخصيص لكورسات/مجموعات (اتركه فارغًا لكل المحتوى — Ctrl للاختيار المتعدد)", "multi", () => [...D.groups.map((x) => [x.id, "مجموعة: " + x.name]), ...D.courses.map((x) => [x.id, "كورس: " + x.name])]]],
+  messages: [["kind", "النوع", "sel", [["public", "رسالة عامة"], ["group", "إعلان لمجموعة/كورس"], ["private", "رسالة خاصة لطالب"]]], ["studentId", "الطالب (للرسالة الخاصة)", "sel", () => [["", "—"], ...D.students.map((x) => [x.id, x.name + " (" + x.code + ")"])]], ["groupId", "المجموعة (للإعلان)", "sel", () => [["", "—"], ...D.groups.map((x) => [x.id, x.name])]], ["title", "العنوان"], ["text", "النص", "ta"]],
+  students: [["name", "الاسم"], ["phone", "رقم الهاتف"], ["code", "رقم الطالب"], ["grade", "الصف"], ["extra", "بيانات إضافية", "ta"], ["password", "كلمة مرور جديدة (اتركها فارغة للإبقاء)"]],
+};
+const COLS = {
+  groups: [["الاسم", (x) => x.name], ["الصف", (x) => x.grade], ["السعر", (x) => x.price], ["الحالة", (x) => x.status]],
+  courses: [["الاسم", (x) => x.name], ["المجموعة", (x) => nm("groups", x.groupId)], ["السعر", (x) => x.price], ["الحالة", (x) => x.status]],
+  videos: [["العنوان", (x) => x.title], ["الكورس", (x) => nm("courses", x.courseId)], ["الترتيب", (x) => x.order], ["الحالة", (x) => x.status]],
+  assignments: [["العنوان", (x) => x.title], ["الكورس", (x) => nm("courses", x.courseId)], ["عدد الأسئلة", (x) => x.questions.length]],
+  payments: [["الاسم", (x) => x.name], ["البيانات", (x) => x.details], ["الحالة", (x) => x.status]],
+  messages: [["النوع", (x) => x.kind], ["العنوان", (x) => x.title], ["النص", (x) => x.text.slice(0, 60)]],
+  students: [["الاسم", (x) => x.name], ["رقم الطالب", (x) => x.code], ["الهاتف", (x) => x.phone], ["الصف", (x) => x.grade]],
+};
+const qToText = (qs) => (qs || []).map((q) => [q.q, ...q.opts, q.correct + 1].join(" | ")).join("\n");
+const textToQ = (t) => t.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const p = l.split("|").map((x) => x.trim()), c = parseInt(p.pop(), 10); if (p.length < 3 || !c) throw new Error("تنسيق سؤال خاطئ: " + l.slice(0, 40)); return { q: p[0], opts: p.slice(1), correct: c - 1 }; });
+async function crud(col, rerender, refs) {
+  await load(col, ...refs); const wrap = h("div"), fs = FIELDS[col], ins = {}; let cur = null;
+  const f = h("form", { class: "box" }), out = h("div"); const title = h("h3", {}, "إضافة جديد"); f.append(title);
+  for (const [k, l, t, o] of fs) {
+    let i;
+    if (t === "ta" || t === "q") i = h("textarea", { rows: t === "q" ? 7 : 3 });
+    else if (t === "sel" || t === "multi") { i = h("select", t === "multi" ? { multiple: 1, size: 5 } : {}); (typeof o === "function" ? o() : o).forEach(([v, n]) => i.append(h("option", { value: v }, n))); }
+    else i = h("input", { type: t === "n" ? "number" : "text" });
+    ins[k] = i; f.append(h("label", {}, l), i);
+  }
+  const reset = () => { cur = null; title.textContent = "إضافة جديد"; f.reset(); };
+  f.append(out, h("button", { class: "btn", type: "submit" }, "حفظ"), " ", h("button", { class: "btn o", type: "button", onclick: reset }, "جديد"));
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault(); out.replaceChildren();
+    try {
+      const b = { id: cur }; for (const [k, , t] of fs) { const i = ins[k]; b[k] = t === "n" ? Number(i.value) : t === "q" ? textToQ(i.value) : t === "multi" ? [...i.selectedOptions].map((o) => o.value) : i.value; }
+      await api("admin/" + col, "POST", b); await rerender();
+    } catch (x) { out.replaceChildren(msg(x.message)); }
+  });
+  let edit = (x) => { cur = x.id; title.textContent = "تعديل"; for (const [k, , t] of fs) { const i = ins[k], v = x[k]; if (t === "q") i.value = qToText(v); else if (t === "multi") [...i.options].forEach((o) => (o.selected = (v || []).includes(o.value))); else i.value = v ?? ""; } f.scrollIntoView({ behavior: "smooth" }); };
+  const cols = COLS[col], tb = h("tbody"), draw = (q) => {
+    tb.replaceChildren(...(D[col].filter((x) => !q || JSON.stringify(x).toLowerCase().includes(q.toLowerCase())).map((x) => h("tr", {}, cols.map(([, fn]) => h("td", {}, String(fn(x) ?? "")))), h("td", {}, h("button", { class: "btn sm", onclick: () => edit(x) }, "تعديل"), " ", h("button", { class: "btn sm d", onclick: async () => { if (confirm("حذف نهائي من قاعدة البيانات مع كل ما يتبعه؟")) { try { await api(`admin/${col}/${x.id}`, "DELETE"); await rerender(); } catch (e) { alert(e.message); } } } }, "حذف")))));
+    if (!tb.children.length) tb.append(h("tr", {}, h("td", { colspan: cols.length + 1 }, "لا توجد بيانات.")));
+  };
+  draw(); wrap.append(f);
+  wrap.append(h("input", { type: "search", placeholder: "بحث...", oninput: (e) => draw(e.target.value) }), h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, cols.map(([n]) => h("th", {}, n)), h("th", {}, ""))), tb)));
+  if (col === "students") { f.style.display = "none"; const e0 = edit; edit = (x) => { f.style.display = ""; e0(x); }; }
+  return wrap;
+}
+const TABS = [["dash", "لوحة التحكم"], ["students", "الطلاب"], ["enr", "التسجيلات"], ["groups", "المجموعات"], ["courses", "الكورسات"], ["videos", "الفيديوهات"], ["assignments", "الواجبات"], ["q", "الأسئلة"], ["messages", "الرسائل والإعلانات"], ["payments", "طرق الدفع"], ["settings", "إعدادات الموقع"], ["seo", "SEO"]];
+async function Control() {
+  const s = await api("admin/status");
+  if (!s.configured) return h("div", { class: "box", style: "max-width:460px;margin:auto" }, h("h1", {}, "إعداد الكونترول"), empty("أدخل مفتاح الإعداد (SETUP_KEY الذي ضبطته عند النشر) ثم اختر اسم الدخول وكلمة المرور."),
+    form([["setupKey", "مفتاح الإعداد", { type: "password" }], ["username", "اسم دخول الكونترول"], ["password", "كلمة المرور (8 أحرف على الأقل)", { type: "password", ac: "new-password" }]], async (v) => { await api("admin/setup", "POST", v); route(); }, "حفظ وبدء الاستخدام"));
+  if (!s.admin) return h("div", { class: "box", style: "max-width:460px;margin:auto" }, h("h1", {}, "دخول الكونترول"), form([["username", "اسم الدخول", { ac: "username" }], ["password", "كلمة المرور", { type: "password", ac: "current-password" }]], async (v) => { await api("admin/login", "POST", v); route(); }, "دخول"));
+  const body = h("div"), tabs = h("div", { class: "tabs" }); let cur = sessionStorage.getItem("tab") || "dash";
+  const show = async (t) => {
+    cur = t; try { sessionStorage.setItem("tab", t); } catch {}
+    tabs.replaceChildren(...TABS.map(([k, n]) => h("button", { class: "btn sm" + (k === t ? "" : " o"), onclick: () => show(k) }, n)), h("button", { class: "btn sm d", onclick: async () => { await api("admin/logout", "POST", {}); route(); } }, "خروج"));
+    body.replaceChildren(empty("جاري التحميل..."));
+    try { body.replaceChildren(await TAB[t](() => show(t))); } catch (e) { body.replaceChildren(msg(e.message)); }
+  };
+  show(cur); return h("div", { "data-t": "الكونترول" }, h("h1", {}, "لوحة التحكم"), tabs, body);
+}
+const TAB = {
+  async dash() {
+    const s = await api("admin/stats"), n = (l, v) => h("div", { class: "box" }, h("b", {}, v), h("div", { class: "muted" }, l));
+    return h("div", {}, h("div", { class: "grid" }, n("الطلاب", s.students), n("المجموعات", s.groups), n("الكورسات", s.courses), n("الفيديوهات", s.videos), n("طلبات بانتظار المراجعة", s.pending), n("اشتراكات مقبولة", s.approved), n("أسئلة بلا رد", s.questions)),
+      h("h3", {}, "إحصائيات الكورسات"), h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["الكورس", "المشتركون", "متوسط الدرجات"].map((x) => h("th", {}, x)))), h("tbody", {}, s.perCourse.length ? s.perCourse.map((c) => h("tr", {}, h("td", {}, c.name), h("td", {}, c.subs), h("td", {}, c.avg == null ? "—" : c.avg + "%"))) : h("tr", {}, h("td", { colspan: 3 }, "لا توجد كورسات."))))));
+  },
+  async students(r) { const w = await crud("students", r, []); return w; },
+  async enr(r) {
+    await load("enrollments"); const st = { pending: "قيد المراجعة", approved: "مقبول", rejected: "مرفوض" }, set = async (id, status) => { await api("admin/enrollments", "POST", { id, status }); r(); };
+    const tb = h("tbody"), draw = (q) => { tb.replaceChildren(...D.enrollments.filter((x) => !q || JSON.stringify(x).includes(q)).map((x) => h("tr", {}, h("td", {}, x.studentName), h("td", {}, x.studentCode), h("td", {}, x.phone + (x.phone2 ? " / " + x.phone2 : "")), h("td", {}, (x.targetType === "course" ? "كورس: " : "مجموعة: ") + x.targetName), h("td", {}, x.methodName), h("td", {}, x.receipt ? h("a", { href: x.receipt, target: "_blank", rel: "noopener" }, "عرض") : "—"), h("td", {}, st[x.status]), h("td", {}, date(x.createdAt)),
+      h("td", {}, h("button", { class: "btn sm g", onclick: () => set(x.id, "approved") }, "قبول"), " ", h("button", { class: "btn sm o", onclick: () => set(x.id, "rejected") }, "رفض"), " ", h("button", { class: "btn sm d", onclick: async () => { if (confirm("حذف الطلب نهائيًا؟")) { await api("admin/enrollments/" + x.id, "DELETE"); r(); } } }, "حذف"))))); if (!tb.children.length) tb.append(h("tr", {}, h("td", { colspan: 9 }, "لا توجد طلبات."))); }; draw();
+    return h("div", {}, h("input", { type: "search", placeholder: "بحث بالاسم أو الرقم...", oninput: (e) => draw(e.target.value) }), h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["الطالب", "رقم الطالب", "الهاتف", "الاشتراك", "الدفع", "الإيصال", "الحالة", "التاريخ", ""].map((x) => h("th", {}, x)))), tb)));
+  },
+  groups: (r) => crud("groups", r, []), courses: (r) => crud("courses", r, ["groups"]), videos: (r) => crud("videos", r, ["courses"]), assignments: (r) => crud("assignments", r, ["courses"]),
+  payments: (r) => crud("payments", r, ["groups", "courses"]), messages: (r) => crud("messages", r, ["groups", "students"]),
+  async q(r) {
+    await load("questions"); return h("div", {}, D.questions.length ? D.questions.map((q) => { const t = h("textarea", { rows: 2 }); t.value = q.reply || "";
+      return h("div", { class: "box" }, h("small", { class: "muted" }, `${q.studentName} — ${q.courseName} — ${date(q.createdAt)}`), h("div", {}, q.text), t, h("button", { class: "btn sm", onclick: async () => { await api("admin/questions", "POST", { id: q.id, reply: t.value }); r(); } }, "حفظ الرد"), " ", h("button", { class: "btn sm d", onclick: async () => { if (confirm("حذف السؤال؟")) { await api("admin/questions/" + q.id, "DELETE"); r(); } } }, "حذف")); }) : empty("لا توجد أسئلة."));
+  },
+  async settings() {
+    const s = await api("admin/settings"), F = [["name", "اسم المنصة"], ["logo", "رابط اللوجو"], ["title", "العنوان الرئيسي"], ["description", "الوصف", { ta: 1 }], ["primary", "اللون الرئيسي", { type: "color" }], ["buttonColor", "لون الأزرار", { type: "color" }], ["bg", "لون الخلفية", { type: "color" }], ["text", "لون النصوص", { type: "color" }], ["heroImage", "صورة خلفية الصفحة الرئيسية"], ["cover", "صورة الغلاف"], ["footer", "نص الـ Footer", { ta: 1 }], ["contact", "بيانات التواصل"]];
+    return h("div", {}, form(F.map(([k, l, o]) => [k, l, { ...(o || {}), v: s[k] || "" }]), async (v, out) => { SET = await api("admin/settings", "POST", v); theme(); out.replaceChildren(msg("تم الحفظ وسيظهر للجميع.", 1)); }, "حفظ"),
+      h("h3", {}, "تغيير بيانات دخول الكونترول"), form([["username", "اسم الدخول الجديد"], ["password", "كلمة مرور جديدة (اختياري)", { type: "password", ac: "new-password" }], ["current", "كلمة المرور الحالية", { type: "password", ac: "current-password" }]], async (v, out) => { await api("admin/credentials", "POST", v); out.replaceChildren(msg("تم التحديث.", 1)); }, "تحديث بيانات الدخول"));
+  },
+  async seo() {
+    const s = await api("admin/settings"), res = h("div", { class: "box" }, empty("جاري الفحص...")), o = location.origin;
+    const prev = h("div"), draw = (v) => { const t = v.seoTitle || `${v.name} - ${v.title}`, d = v.seoDescription || v.description, im = v.ogImage || v.heroImage || v.logo;
+      prev.replaceChildren(h("h3", {}, "معاينة Google (تقريبية)"), h("div", { class: "g1" }, h("div", { class: "u" }, o), h("div", { class: "t" }, t.slice(0, 60)), h("div", {}, d.slice(0, 160))), h("h3", {}, "معاينة Open Graph"), h("div", { class: "card", style: "max-width:420px" }, im ? h("img", { class: "im", src: im, alt: "", onerror: (e) => e.target.remove() }) : null, h("div", { class: "cb" }, h("small", { class: "muted" }, new URL(o).host), h("b", {}, t), h("div", { class: "muted" }, d.slice(0, 120))))); }; draw(s);
+    const chk = async () => {
+      const get = async (u) => { try { const r = await fetch(u); return { ok: r.ok, t: await r.text() }; } catch { return { ok: false, t: "" }; } }, dom = (t) => new DOMParser().parseFromString(t, "text/html");
+      const [home, rb, sm, ctl, my] = await Promise.all([get("/"), get("/robots.txt"), get("/sitemap.xml"), get("/control"), get("/my")]), d = dom(home.t), rob = (x) => (dom(x).querySelector('meta[name="robots"]') || {}).content || "";
+      const rows = [["Title", !!(d.title || "").trim()], ["Meta Description", !!(d.querySelector('meta[name="description"]') || {}).content], ["Canonical", !!d.querySelector('link[rel="canonical"]')], ["Open Graph", !!d.querySelector('meta[property="og:title"]')], ["Twitter Cards", !!d.querySelector('meta[name="twitter:card"]')], ["Structured Data (JSON-LD)", !!d.querySelector('script[type="application/ld+json"]')], ["robots.txt", rb.ok && /Sitemap:/i.test(rb.t)], ["sitemap.xml", sm.ok && /<urlset/.test(sm.t)], ["الرئيسية قابلة للفهرسة (index)", !/noindex/i.test(rob(home.t))], ["/control غير مفهرس (noindex)", /noindex/i.test(rob(ctl.t))], ["/my غير مفهرس (noindex)", /noindex/i.test(rob(my.t))]];
+      res.replaceChildren(h("h3", {}, "فحص إعدادات SEO"), h("small", { class: "muted" }, "هذا فحص للإعدادات فقط، ولا يعني أن الموقع ظهر فعلًا في Google."), rows.map(([n, ok]) => h("div", {}, (ok ? "✅ " : "❌ ") + n)));
+    }; chk();
+    const f = form([["seoTitle", "عنوان SEO (Title)", { v: s.seoTitle || "" }], ["seoDescription", "وصف SEO", { ta: 1, v: s.seoDescription || "" }], ["ogImage", "رابط صورة المعاينة (Open Graph)", { v: s.ogImage || "" }]], async (v, out) => { SET = await api("admin/settings", "POST", v); draw(SET); chk(); out.replaceChildren(msg("تم الحفظ.", 1)); }, "حفظ إعدادات SEO");
+    return h("div", {}, f, prev, res);
+  },
+};
+(async function boot() {
+  try { const [s, m] = await Promise.all([api("settings"), api("me")]); SET = s; ME = m.student; theme(); } catch (e) {}
+  route();
+})();
